@@ -1,336 +1,199 @@
-# Risco_Stack_RPi_V2
+# Risco Gateway Modbus Windows
 
-Gateway Web + Modbus TCP/IP para paneles de intrusion RISCO, orientado a Raspberry Pi 5.
+Gateway para paneles RISCO que corre en Windows y expone:
 
-Proyecto independiente para Raspberry Pi 5. Su objetivo es operar como gateway estable entre paneles RISCO, la interfaz web y clientes Modbus TCP.
+- Dashboard web de monitoreo y control.
+- Modbus TCP para integracion local.
+- BACnet/IP opcional para integracion BMS.
+- Configuracion web del panel y del gateway.
+- Paginas web de diagnostico, Modbus, BACnet y debug.
+- Servicio Windows con arranque automatico.
+- Testigo en bandeja del sistema.
 
-Mantiene la logica y el objetivo operativo del gateway:
-- comunicacion LAN con el panel RISCO
-- dashboard web
-- menu de configuracion
-- servidor Modbus TCP
-- login web y gestion de usuarios
-- soporte experimental para particiones de dos digitos
+El core del bridge con el panel y la logica general del gateway se mantienen. Esta version adapta el runtime, la instalacion y la operacion para Windows Server y Windows 11.
 
-No usa Docker. El flujo recomendado es desarrollar en Windows con VS Code y desplegar/actualizar en Raspberry Pi mediante GitHub.
+## Objetivo operativo
 
-## Arquitectura del repo
+El equipo Windows queda dentro de la misma red IP local donde estan:
+
+- el panel RISCO
+- el cliente que consume Modbus TCP
+- los equipos que abren el dashboard y la pagina de configuracion
+
+El gateway:
+
+- se conecta por TCP/IP al panel RISCO
+- publica estados y control por Modbus TCP
+- publica estados por BACnet/IP si el modulo esta habilitado
+- expone dashboard, login y configuracion web
+- arranca como servicio al iniciar Windows
+
+## Arquitectura
 
 ```text
-Risco_Stack_RPi_V2/
-|- bridge/            # Nucleo de comunicacion con el panel RISCO
-|- gateway/           # Web UI, auth, config y servidor Modbus TCP
-|- runtime/           # Configuracion default y datos persistentes
-|- scripts/           # Scripts de soporte para Raspberry Pi
-|- deploy/systemd/    # Servicio systemd de ejemplo
+Risco_Gateway_Modbus_Windows/
+|- bridge/                    # Nucleo de comunicacion con el panel RISCO
+|- gateway/                   # Runtime web, auth, config y servidor Modbus TCP
+|- gateway/windows/           # Servicio WinSW, firewall, tray monitor e instalacion
+|- runtime/                   # Configuracion versionada y datos de runtime en desarrollo
+|- build-windows-installer.ps1
 |- README.md
 `- LICENSE
 ```
 
-### `bridge/`
-Modulo de bajo nivel del panel:
-- sockets y sesion con el panel
-- descubrimiento de zonas, salidas y particiones
-- parser de estados
-- armado, desarmado y bypass
-- estrategias para particiones 10+
+## Instalador
 
-### `gateway/`
-Aplicacion principal:
-- servidor web
-- login
-- pagina de configuracion
-- dashboard en tiempo real
-- servidor Modbus TCP
-- bootstrap del runtime
+El instalador generado queda en:
 
-### `runtime/`
-Runtime persistente:
-- `runtime/config.default.json`: plantilla versionada
-- `runtime/data/config.json`: config activa
-- `runtime/data/users.json`: usuarios del login
+```text
+build/windows-installer/RiscoGateway-Windows-Installer.exe
+```
 
-### `scripts/`
-- `scripts/build-rpi.sh`: instala dependencias y compila todo
-- `scripts/set-ip-rpi.sh`: cambio de IP del Raspberry desde la web
-
-### `deploy/systemd/`
-- `deploy/systemd/risco-stack-rpi-v2.service`: servicio para arranque automatico
-
-## Flujo recomendado de trabajo
-
-La idea operativa desde ahora es esta:
-
-1. Desarrollas y haces cambios en Windows con VS Code.
-2. Haces commit y push al repo GitHub `Risco_Stack_RPi_V2`.
-3. En la Raspberry Pi 5 haces `git pull`.
-4. Recompilas.
-5. Reinicias el servicio.
-
-Asi no vuelves a copiar el proyecto manualmente desde cero.
-
-## Desarrollo en Windows
-
-### Ruta local de trabajo
-
-En este PC la ruta es:
+Para regenerarlo:
 
 ```powershell
-C:\manting_rpi\risco_stack_RPi_V2
+powershell -ExecutionPolicy Bypass -File .\build-windows-installer.ps1
 ```
 
-### Flujo de commit y push desde VS Code
+Ese proceso:
 
-1. Abre en VS Code la carpeta:
+1. instala dependencias
+2. compila `bridge`
+3. compila `gateway`
+4. arma el payload Windows
+5. descarga WinSW
+6. genera el `.exe`
 
-```powershell
-C:\manting_rpi\risco_stack_RPi_V2
-```
+## Comportamiento en Windows
 
-2. Haz los cambios.
-3. En Source Control revisa los archivos modificados.
-4. Escribe el mensaje de commit.
-5. Haz `Commit`.
-6. Haz `Push` al repositorio GitHub del proyecto.
+- Servicio Windows: `RiscoGateway`
+- Carpeta de instalacion: `%ProgramFiles%\RiscoGateway`
+- Datos persistentes: `%ProgramData%\RiscoGateway`
+- Configuracion activa: `%ProgramData%\RiscoGateway\data\config.json`
+- Logs del servicio: `%ProgramData%\RiscoGateway\logs`
+- Monitor de bandeja: arranca al iniciar sesion
 
-Si prefieres terminal en Windows:
+La desinstalacion elimina solo componentes del gateway:
 
-```powershell
-cd C:\manting_rpi\risco_stack_RPi_V2
-git add -A
-git commit -m "Release V2.0: simplify architecture for Raspberry Pi"
-git push -u origin main
-```
+- servicio
+- reglas de firewall del gateway
+- entrada de autoarranque del monitor
+- instalacion en `Program Files`
 
-## Despliegue inicial en Raspberry Pi 5
-
-### 1. Clonar el repo
-
-```bash
-cd /home/pi
-git clone https://github.com/jatsoca/Risco_Stack_RPi_V2.git
-cd /home/pi/Risco_Stack_RPi_V2
-```
-
-### 2. Instalar Node.js y npm
-
-```bash
-sudo apt-get update
-sudo apt-get install -y nodejs npm
-node -v
-npm -v
-```
-
-Node.js 20 recomendado.
-
-### 3. Compilar el proyecto
-
-```bash
-cd /home/pi/Risco_Stack_RPi_V2
-chmod +x ./scripts/build-rpi.sh
-./scripts/build-rpi.sh
-```
-
-Ese script hace:
-1. `npm install` en `bridge`
-2. `npm run build` en `bridge`
-3. `npm install` en `gateway`
-4. `npm run build` en `gateway`
-
-### 4. Primer arranque manual
-
-```bash
-cd /home/pi/Risco_Stack_RPi_V2/gateway
-sudo node dist/main.js
-```
-
-En el primer arranque:
-- si `runtime/data/config.json` no existe, se crea desde `runtime/config.default.json`
-- si `runtime/data/users.json` no existe, se crea automaticamente
-
-### Credenciales iniciales
+## Credenciales iniciales
 
 - usuario: `admin`
 - contrasena: `Admin123`
 
-### Endpoints principales
+Se recomienda cambiar la contrasena despues del primer ingreso.
 
-- web: `http://IP_DEL_RPI:1001`
-- config: `http://IP_DEL_RPI:1001/config`
-- health: `http://IP_DEL_RPI:1001/health`
+## Configuracion web
+
+Desde `/config` puedes ajustar:
+
+- IP y puerto del panel
+- password e ID del panel
+- modo de conexion `direct` o `proxy`
+- watchdog y log de comandos
+- puerto web y ruta WebSocket
+- host y puerto Modbus TCP
+- BACnet/IP desde `/bacnet`
+- nivel de log y heartbeat
+- interface alias del host Windows
+- estrategia final de comando para particiones de dos digitos: `ARMP=N` y `DISARMP=N`
+
+## Endpoints principales
+
+- dashboard: `http://IP_DEL_PC:1001/`
+- configuracion: `http://IP_DEL_PC:1001/config`
+- diagnostico: `http://IP_DEL_PC:1001/diagnostics`
+- mapa Modbus: `http://IP_DEL_PC:1001/modbus`
+- BACnet/IP: `http://IP_DEL_PC:1001/bacnet`
+- debug: `http://IP_DEL_PC:1001/debug`
+- health: `http://IP_DEL_PC:1001/health`
 - Modbus TCP: puerto `502`
+- BACnet/IP: puerto UDP `47808` cuando esta habilitado
 
-## Actualizacion en Raspberry Pi 5 desde GitHub
+## Mapas BMS
 
-Cada vez que hagas cambios en Windows y los subas a GitHub:
+Modbus TCP:
 
-```bash
-cd /home/pi/Risco_Stack_RPi_V2
-git pull
-./scripts/build-rpi.sh
-sudo systemctl restart risco-stack-rpi-v2.service
-```
+- Holding registers `1-32`: particiones. `0=disarmed`, `1=armed`, `2=triggered`, `3=ready`, `4=not ready`.
+- Holding registers `33-544`: zonas. `0=closed`, `1=open`, `2=bypass`.
+- Discrete inputs `1-32`: particion en alarma.
+- Discrete inputs `33-544`: zona abierta.
 
-Si aun no tienes el servicio instalado, puedes arrancar manualmente:
+BACnet/IP:
 
-```bash
-cd /home/pi/Risco_Stack_RPi_V2/gateway
-sudo node dist/main.js
-```
+- Device: instancia configurable, default `432001`.
+- Analog Value `1-32`: mismo valor de particiones que Modbus.
+- Analog Value `33-544`: mismo valor de zonas que Modbus.
+- Binary Value `1-32`: alarma de particion.
+- Binary Value `33-544`: zona abierta.
+- Escritura BACnet queda bloqueada por defecto. Al habilitarla, AV `1-32` acepta `0=desarmar` y `1=armar total`; AV `33-544` acepta `0=normal` y `2=bypass`.
 
-Este es el flujo recomendado a partir de ahora:
-- Windows: editas, commit, push
-- Raspberry: pull, build, restart
+## Desarrollo local
 
-## Servicio systemd en Raspberry Pi 5
-
-### Instalar el servicio
-
-```bash
-sudo cp /home/pi/Risco_Stack_RPi_V2/deploy/systemd/risco-stack-rpi-v2.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now risco-stack-rpi-v2.service
-```
-
-### Ver estado y logs
-
-```bash
-sudo systemctl status risco-stack-rpi-v2.service
-sudo journalctl -u risco-stack-rpi-v2.service -f
-```
-
-### Si no quieres usar root
-
-El puerto `502` requiere privilegios por ser menor a `1024`.
-
-Alternativa:
-
-```bash
-sudo setcap 'cap_net_bind_service=+ep' /usr/bin/node
-```
-
-Luego ajustas el servicio para correr como `pi`.
-
-## Configuracion del gateway
-
-### Rutas de runtime por defecto
-
-- config base: `runtime/config.default.json`
-- config activa: `runtime/data/config.json`
-- usuarios: `runtime/data/users.json`
-- assets web: `gateway/public`
-- script cambio IP: `scripts/set-ip-rpi.sh`
-
-### Variables de entorno soportadas
-
-- `RISCO_CONFIG_FILE`
-- `RISCO_DEFAULT_CONFIG_FILE`
-- `RISCO_DATA_DIR`
-- `RISCO_PUBLIC_DIR`
-- `RISCO_HOST_IP_SCRIPT`
-
-Compatibilidad heredada:
-- `RISCO_MQTT_HA_CONFIG_FILE`
-- `RISCO_MQTT_HA_DEFAULT_CONFIG`
-
-### Parametros principales
-
-- `panel.panelIp`
-- `panel.panelPort`
-- `panel.panelPassword`
-- `panel.panelId`
-- `panel.socketMode`
-- `panel.watchDogInterval`
-- `panel.commandsLog`
-- `web.http_port`
-- `modbus.port`
-- `modbus.host`
-
-## Particiones de dos digitos
-
-Se mantiene el ajuste experimental para particiones `10+`.
-
-Estrategias disponibles:
-- `equals_star_decimal`
-- `colon_decimal`
-- `colon_zero_pad_3`
-- `equals_zero_pad_3`
-- `equals_hex`
-- `equals_hex_zero_pad_2`
-- `equals_plain`
-
-Modo recomendado por ahora:
-
-```json
-"partitionCommandMode": "probe"
-```
-
-Orden default:
-
-```json
-[
-  "equals_star_decimal",
-  "colon_decimal",
-  "colon_zero_pad_3",
-  "equals_zero_pad_3",
-  "equals_hex_zero_pad_2",
-  "equals_plain"
-]
-```
-
-El gateway deja en log la estrategia y la trama exacta enviada al panel para que puedas validar cual funciona mejor.
-
-## Cambio de IP del Raspberry desde la web
-
-La web usa:
-
-```text
-scripts/set-ip-rpi.sh
-```
-
-Si quieres usarlo como script del sistema:
-
-```bash
-sudo install -m 0755 /home/pi/Risco_Stack_RPi_V2/scripts/set-ip-rpi.sh /usr/local/bin/set-ip-rpi.sh
-```
-
-Si el servicio no corre como `root`, debes autorizarlo con `sudoers`.
-
-## Validacion hecha en esta reorganizacion
-
-Validado en esta sesion:
-- instalacion limpia de dependencias en `bridge`
-- instalacion limpia de dependencias en `gateway`
-- compilacion de `bridge`
-- compilacion de `gateway`
-- arranque de prueba del gateway
-- respuesta correcta de `/health`
-
-No validado aqui:
-- conexion real a un panel fisico
-- escritura real Modbus con cliente externo
-- ejecucion real de `systemd` en Raspberry Pi
-
-## Resumen operativo
-
-Desde ahora el flujo recomendado es:
-
-### En Windows
+Compilar bridge:
 
 ```powershell
-cd C:\manting_rpi\risco_stack_RPi_V2
-git add -A
-git commit -m "tu cambio"
-git push
+cd .\bridge
+npm install
+npm run build
 ```
 
-### En Raspberry Pi 5
+Compilar gateway:
 
-```bash
-cd /home/pi/Risco_Stack_RPi_V2
-git pull
-./scripts/build-rpi.sh
-sudo systemctl restart risco-stack-rpi-v2.service
+```powershell
+cd ..\gateway
+npm install
+npm run build
 ```
 
-Ese es el camino correcto para evolucionar el proyecto sin volver a copiar todo manualmente.
+Ejecutar localmente sin instalar el servicio:
+
+```powershell
+cd .\gateway
+$env:RISCO_BASE_DIR = "$PWD\\runtime-data"
+node .\dist\main.js
+```
+
+## Instalacion manual sin el .exe
+
+Si ya tienes el runtime compilado y quieres instalar manualmente:
+
+```powershell
+cd .\gateway\windows
+powershell -ExecutionPolicy Bypass -File .\install-gateway.ps1 -SourceRoot C:\ruta\al\runtime\gateway
+```
+
+## Desinstalacion manual
+
+```powershell
+cd "%ProgramFiles%\RiscoGateway\windows"
+powershell -ExecutionPolicy Bypass -File .\uninstall-gateway.ps1
+```
+
+Para borrar tambien los datos persistentes:
+
+```powershell
+cd "%ProgramFiles%\RiscoGateway\windows"
+powershell -ExecutionPolicy Bypass -File .\uninstall-gateway.ps1 -RemoveData
+```
+
+## Produccion
+
+Para dejarlo estable en campo:
+
+- usa IP fija para el PC y para el panel
+- valida los puertos HTTP y Modbus antes de entregar
+- cambia la clave admin despues de instalar
+- prueba armado, desarmado, bypass y lectura Modbus
+- conserva respaldo de `config.json` antes de actualizar
+
+## Notas tecnicas
+
+- No usa `serialport`
+- No usa Docker
+- El reinicio controlado del gateway se hace por salida supervisada del servicio
+- El core del bridge y la logica de armado, bypass, estados y Modbus no cambian

@@ -33,13 +33,41 @@ import { logger } from '../Logger'
 import { assertIsDefined } from '../Assertions'
 import { RiscoCommandError } from '../RiscoError'
 import {
+  buildPartitionCommandFromStrategy,
   DEFAULT_PARTITION_COMMAND_STRATEGY,
+  PartitionCommandVerb,
   PartitionCommandStrategy,
 } from '../PartitionCommandConfig'
 
-interface PartitionCommandAttempt {
+export interface PartitionCommandAttempt {
   strategy: PartitionCommandStrategy
   rawCommand: string
+}
+
+export interface PartitionDebugStateSnapshot {
+  arm: boolean
+  homeStay: boolean
+  ready: boolean
+  open: boolean
+  alarm: boolean
+}
+
+export interface PartitionCommandExecutionAttempt extends PartitionCommandAttempt {
+  response?: string
+  ack: boolean
+  stateConfirmed: boolean
+  success: boolean
+  errorCode?: string
+  errorMessage?: string
+  timeout?: boolean
+}
+
+export interface PartitionCommandExecutionResult {
+  partitionId: number
+  command: PartitionCommandVerb
+  success: boolean
+  attempts: PartitionCommandExecutionAttempt[]
+  finalState: PartitionDebugStateSnapshot
 }
 
 export class Partition extends EventEmitter {
@@ -150,33 +178,17 @@ export class Partition extends EventEmitter {
     }
   }
 
-  private buildPartitionCommand(command: string, strategy: PartitionCommandStrategy): string {
-    const decimal = `${this.Id}`
-    const decimalPadded2 = decimal.padStart(2, '0')
-    const decimalPadded3 = decimal.padStart(3, '0')
-    const hex = this.Id.toString(16).toUpperCase()
-    const hexPadded2 = hex.padStart(2, '0')
-
-    switch (strategy) {
-      case 'equals_star_decimal':
-        return `${command}=*${decimal}`
-      case 'colon_decimal':
-        return `${command}:${decimal}`
-      case 'colon_zero_pad_3':
-        return `${command}:${decimalPadded3}`
-      case 'equals_zero_pad_3':
-        return `${command}=${decimalPadded3}`
-      case 'equals_hex':
-        return `${command}=${hex}`
-      case 'equals_hex_zero_pad_2':
-        return `${command}=${hexPadded2}`
-      case 'equals_plain':
-      default:
-        return `${command}=${decimal}`
+  private getStateSnapshot(): PartitionDebugStateSnapshot {
+    return {
+      arm: this.Arm,
+      homeStay: this.HomeStay,
+      ready: this.Ready,
+      open: this.Open,
+      alarm: this.Alarm,
     }
   }
 
-  private getPartitionCommandAttempts(command: string): PartitionCommandAttempt[] {
+  private getPartitionCommandAttempts(command: PartitionCommandVerb): PartitionCommandAttempt[] {
     const config = this.riscoComm.getPartitionCommandConfig()
     const strategies = (this.Id >= 10 && config.mode === 'probe')
       ? config.probeOrder
@@ -185,7 +197,21 @@ export class Partition extends EventEmitter {
     const uniqueStrategies = [...new Set(strategies)]
     return uniqueStrategies.map(strategy => ({
       strategy,
-      rawCommand: this.buildPartitionCommand(command, strategy),
+      rawCommand: buildPartitionCommandFromStrategy(command, this.Id, strategy),
+    }))
+  }
+
+  previewPartitionCommandAttempts(
+    command: PartitionCommandVerb,
+    strategies?: PartitionCommandStrategy[],
+  ): PartitionCommandAttempt[] {
+    const selectedStrategies = (strategies && strategies.length > 0)
+      ? [...new Set(strategies)]
+      : [...new Set(this.getPartitionCommandAttempts(command).map(attempt => attempt.strategy))]
+
+    return selectedStrategies.map(strategy => ({
+      strategy,
+      rawCommand: buildPartitionCommandFromStrategy(command, this.Id, strategy),
     }))
   }
 
@@ -199,7 +225,7 @@ export class Partition extends EventEmitter {
     }
   }
 
-  private expectedStateFor(command: string): (() => boolean) | null {
+  private expectedStateFor(command: PartitionCommandVerb): (() => boolean) | null {
     switch (command) {
       case 'ARM':
         return () => this.Arm && !this.HomeStay
@@ -212,7 +238,7 @@ export class Partition extends EventEmitter {
     }
   }
 
-  private async waitForExpectedState(command: string, timeoutMs = 4000, intervalMs = 400): Promise<boolean> {
+  private async waitForExpectedState(command: PartitionCommandVerb, timeoutMs = 4000, intervalMs = 400): Promise<boolean> {
     const expected = this.expectedStateFor(command)
     if (!expected) return true
 
@@ -225,10 +251,13 @@ export class Partition extends EventEmitter {
     return expected()
   }
 
-  private async sendPartitionCommand(command: string): Promise<boolean> {
+  private async executePartitionCommandAttempts(
+    command: PartitionCommandVerb,
+    attempts: PartitionCommandAttempt[],
+  ): Promise<PartitionCommandExecutionResult> {
     assertIsDefined(this.riscoComm.tcpSocket, 'RiscoComm.tcpSocket', 'TCP is not initialized')
     const tcpSocket = this.riscoComm.tcpSocket
-    const attempts = this.getPartitionCommandAttempts(command)
+    const attemptResults: PartitionCommandExecutionAttempt[] = []
 
     for (let i = 0; i < attempts.length; i++) {
       const attempt = attempts[i]
@@ -241,32 +270,130 @@ export class Partition extends EventEmitter {
         const response = await tcpSocket.sendCommand(attempt.rawCommand)
         if (response === 'ACK') {
           const ok = await this.waitForExpectedState(command)
-          if (ok) return true
+          attemptResults.push({
+            ...attempt,
+            response,
+            ack: true,
+            stateConfirmed: ok,
+            success: ok,
+          })
+          if (ok) {
+            logger.log('info', `Partition ${this.Id} ${command} succeeded with strategy '${attempt.strategy}'`)
+            return {
+              partitionId: this.Id,
+              command,
+              success: true,
+              attempts: attemptResults,
+              finalState: this.getStateSnapshot(),
+            }
+          }
           if (!isLast) {
             logger.log('warn', `Command ${command} ACK for partition ${this.Id} with strategy '${attempt.strategy}', but target partition state did not change. Trying next strategy.`)
             continue
           }
-          return false
+          logger.log('warn', `Partition ${this.Id} ${command} got ACK with strategy '${attempt.strategy}', but target state was not confirmed.`)
+          return {
+            partitionId: this.Id,
+            command,
+            success: false,
+            attempts: attemptResults,
+            finalState: this.getStateSnapshot(),
+          }
         }
         const error = tcpSocket.getErrorCode(response)
+        attemptResults.push({
+          ...attempt,
+          response,
+          ack: false,
+          stateConfirmed: false,
+          success: false,
+          errorCode: error?.[0],
+          errorMessage: error?.[1],
+        })
         if (!isLast && error?.[0] === 'N05') {
           logger.log('warn', `Command ${command} rejected for partition ${this.Id} with strategy '${attempt.strategy}' (N05). Trying next strategy.`)
           continue
         }
-        return false
+        logger.log('warn', `Partition ${this.Id} ${command} rejected with strategy '${attempt.strategy}' response='${response}'`)
+        return {
+          partitionId: this.Id,
+          command,
+          success: false,
+          attempts: attemptResults,
+          finalState: this.getStateSnapshot(),
+        }
       } catch (err) {
         if (err instanceof RiscoCommandError) {
           const ok = await this.waitForExpectedState(command)
-          if (ok) return true
+          attemptResults.push({
+            ...attempt,
+            ack: false,
+            stateConfirmed: ok,
+            success: ok,
+            timeout: true,
+            errorMessage: err.message,
+          })
+          if (ok) {
+            logger.log('info', `Partition ${this.Id} ${command} succeeded after timeout using strategy '${attempt.strategy}'`)
+            return {
+              partitionId: this.Id,
+              command,
+              success: true,
+              attempts: attemptResults,
+              finalState: this.getStateSnapshot(),
+            }
+          }
           if (!isLast) {
             logger.log('warn', `Command ${command} timeout for partition ${this.Id} with strategy '${attempt.strategy}'. Trying next strategy.`)
             continue
           }
         }
+        if (!(err instanceof RiscoCommandError)) {
+          attemptResults.push({
+            ...attempt,
+            ack: false,
+            stateConfirmed: false,
+            success: false,
+            errorMessage: err instanceof Error ? err.message : String(err),
+          })
+        }
         throw err
       }
     }
-    return false
+
+    return {
+      partitionId: this.Id,
+      command,
+      success: false,
+      attempts: attemptResults,
+      finalState: this.getStateSnapshot(),
+    }
+  }
+
+  async debugPartitionCommand(
+    command: PartitionCommandVerb,
+    strategies?: PartitionCommandStrategy[],
+  ): Promise<PartitionCommandExecutionResult> {
+    const attempts = (strategies && strategies.length > 0)
+      ? this.previewPartitionCommandAttempts(command, strategies)
+      : this.getPartitionCommandAttempts(command)
+    return this.executePartitionCommandAttempts(command, attempts)
+  }
+
+  async debugRawPartitionCommand(
+    command: PartitionCommandVerb,
+    rawCommand: string,
+    strategy: PartitionCommandStrategy = DEFAULT_PARTITION_COMMAND_STRATEGY,
+  ): Promise<PartitionCommandExecutionResult> {
+    return this.executePartitionCommandAttempts(command, [{
+      strategy,
+      rawCommand,
+    }])
+  }
+
+  private async sendPartitionCommand(command: PartitionCommandVerb): Promise<boolean> {
+    const result = await this.debugPartitionCommand(command)
+    return result.success
   }
 
   async awayArm(): Promise<boolean> {

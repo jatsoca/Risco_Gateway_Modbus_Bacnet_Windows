@@ -1,0 +1,15 @@
+<service>
+  <id>RiscoGateway</id>
+  <name>Risco Gateway</name>
+  <description>Gateway Modbus y Web para paneles RISCO.</description>
+  <executable>%BASE%\..\node.exe</executable>
+  <arguments>"%BASE%\..\dist\main.js"</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
+  <env name="RISCO_BASE_DIR" value="%ProgramData%\RiscoGateway" />
+  <env name="RISCO_SUPERVISED" value="1" />
+  <env name="RISCO_SERVICE_MODE" value="winsw" />
+  <logpath>%ProgramData%\RiscoGateway\logs</logpath>
+  <log mode="roll" />
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="20 sec" />
+</service>

@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
-import { ensureRuntimeDirectories, getRuntimePaths, startGateway } from './lib';
+import {
+  enterRuntimeWorkingDirectory,
+  ensureRuntimeDirectories,
+  getRuntimePaths,
+  startGateway,
+  syncFirewallRulesInBackground,
+} from './lib';
 
 function maskConfig(raw: any) {
   const clone = JSON.parse(JSON.stringify(raw));
@@ -12,6 +18,8 @@ function maskConfig(raw: any) {
 
 try {
   ensureRuntimeDirectories();
+  enterRuntimeWorkingDirectory();
+  syncFirewallRulesInBackground();
   const runtimePaths = getRuntimePaths();
 
   if (!fs.existsSync(runtimePaths.configPath)) {

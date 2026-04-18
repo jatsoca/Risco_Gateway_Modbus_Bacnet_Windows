@@ -1,11 +1,5 @@
 export const PARTITION_COMMAND_STRATEGIES = [
-  'equals_star_decimal',
-  'colon_decimal',
-  'colon_zero_pad_3',
-  'equals_zero_pad_3',
-  'equals_hex',
-  'equals_hex_zero_pad_2',
-  'equals_plain',
+  'p_suffix_equals_plain',
 ] as const;
 
 export type PartitionCommandStrategy = typeof PARTITION_COMMAND_STRATEGIES[number];
@@ -25,14 +19,11 @@ export interface PartitionCommandConfig {
   probeOrder: PartitionCommandStrategy[];
 }
 
-export const DEFAULT_PARTITION_COMMAND_STRATEGY: PartitionCommandStrategy = 'equals_star_decimal';
+export type PartitionCommandVerb = 'ARM' | 'STAY' | 'DISARM';
+
+export const DEFAULT_PARTITION_COMMAND_STRATEGY: PartitionCommandStrategy = 'p_suffix_equals_plain';
 export const DEFAULT_PARTITION_COMMAND_PROBE_ORDER: PartitionCommandStrategy[] = [
-  'equals_star_decimal',
-  'colon_decimal',
-  'colon_zero_pad_3',
-  'equals_zero_pad_3',
-  'equals_hex_zero_pad_2',
-  'equals_plain',
+  'p_suffix_equals_plain',
 ];
 
 const strategySet = new Set<string>(PARTITION_COMMAND_STRATEGIES);
@@ -75,4 +66,23 @@ export const normalizePartitionCommandConfig = (
     strategy,
     probeOrder,
   };
+};
+
+export const buildPartitionCommandFromStrategy = (
+  command: PartitionCommandVerb,
+  partitionId: number,
+  strategy: PartitionCommandStrategy,
+): string => {
+  const commandToken = command === 'ARM'
+    ? 'ARMP'
+    : command === 'DISARM'
+      ? 'DISARMP'
+      : command;
+  const decimal = `${partitionId}`;
+
+  switch (strategy) {
+    case 'p_suffix_equals_plain':
+    default:
+      return `${commandToken}=${decimal}`;
+  }
 };

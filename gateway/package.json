@@ -1,34 +1,35 @@
 {
-  "name": "@jatsoca/risco-stack-rpi-gateway",
+  "name": "@jatsoca/risco-gateway-windows",
   "version": "0.4.2",
-  "description": "Web and Modbus gateway for RISCO intrusion panels on Raspberry Pi",
+  "description": "Web and Modbus gateway for RISCO intrusion panels on Windows",
   "main": "dist/main.js",
   "types": "dist/lib/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('fs').rmSync('dist',{ recursive: true, force: true })\" && tsc",
     "watch": "tsc -w",
-    "run": "tsc && node ./dist/main.js",
+    "run": "npm run build && node ./dist/main.js",
     "test": "echo \"Error: no test specified\""
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jatsoca/Risco_Stack_RPi_V2.git"
+    "url": "https://github.com/jatsoca/Risco_Gateway_Modbus_Windows.git"
   },
   "keywords": [
     "risco",
     "alarm",
     "modbus",
-    "raspberry-pi",
+    "windows",
     "iRISCO"
   ],
   "author": "Jaime Acosta",
   "license": "MIT",
   "dependencies": {
-    "bcryptjs": "^2.4.3",
     "@jatsoca/risco-bridge": "file:../bridge",
+    "bcryptjs": "^2.4.3",
     "express": "^4.18.2",
     "jsmodbus": "^4.0.6",
     "lodash": "^4.17.21",
+    "node-bacnet": "^0.2.4",
     "tiny-typed-emitter": "^2.1.0",
     "tslib": "^2.6.2",
     "winston": "^3.3.3",

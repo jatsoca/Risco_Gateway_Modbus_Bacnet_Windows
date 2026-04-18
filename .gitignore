@@ -7,17 +7,24 @@ bridge/node_modules/
 dist/
 gateway/dist/
 bridge/dist/
+build/
 
 # Runtime data
 runtime/data/*
 !runtime/data/.gitkeep
+.runtime-idea-test/
 
 # Logs and temp files
 npm-debug.log*
 yarn-error.log*
 *.log
 *.tar
+*.pcap
+*.pcapng
 panel.log
+
+# Vendor/proprietary software used only for protocol analysis
+RISCO Group CS Full 4.1.0/
 
 # Editor / OS
 .DS_Store

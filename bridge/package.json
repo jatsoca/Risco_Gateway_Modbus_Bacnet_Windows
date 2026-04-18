@@ -24,10 +24,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jatsoca/Risco_Stack_RPi_V2.git"
+    "url": "git+https://github.com/jatsoca/Risco_Gateway_Modbus_Windows.git"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('fs').rmSync('dist',{ recursive: true, force: true })\" && tsc",
     "watch": "tsc-watch",
     "start": "tsc && node ./dist/main.js"
   },
@@ -45,7 +45,7 @@
   ],
   "author": "Jaime Acosta",
   "license": "MIT",
-  "homepage": "https://github.com/jatsoca/Risco_Stack_RPi_V2#readme",
+  "homepage": "https://github.com/jatsoca/Risco_Gateway_Modbus_Windows#readme",
   "devDependencies": {
     "@tsconfig/recommended": "^1.0.1",
     "@types/node": "^17.0.2",
